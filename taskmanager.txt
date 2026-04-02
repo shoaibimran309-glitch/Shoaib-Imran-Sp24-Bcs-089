@@ -1,0 +1,301 @@
+import 'package:flutter/material.dart';
+
+void main() {
+  runApp(TaskManagerApp());
+}
+
+/// ===================== APP ROOT =====================
+class TaskManagerApp extends StatefulWidget {
+  @override
+  State<TaskManagerApp> createState() => _TaskManagerAppState();
+}
+
+class _TaskManagerAppState extends State<TaskManagerApp> {
+  bool darkMode = false;
+
+  void toggleTheme() {
+    setState(() => darkMode = !darkMode);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      theme: darkMode ? ThemeData.dark() : ThemeData.light(),
+      home: TaskHomePage(onToggleTheme: toggleTheme),
+    );
+  }
+}
+
+/// ===================== TASK MODEL =====================
+class Task {
+  String id;
+  String title;
+  String description;
+  DateTime date;
+  bool completed;
+  int repeatDays;
+
+  Task({
+    required this.id,
+    required this.title,
+    required this.description,
+    required this.date,
+    this.completed = false,
+    this.repeatDays = 0,
+  });
+}
+
+/// ===================== FAKE CLOUD =====================
+class FakeFirebase {
+  static List<Task> cloud = [];
+
+  static void upload(List<Task> tasks) {
+    cloud = List.from(tasks);
+  }
+
+  static List<Task> download() => cloud;
+}
+
+/// ===================== HOME =====================
+class TaskHomePage extends StatefulWidget {
+  final VoidCallback onToggleTheme;
+
+  TaskHomePage({required this.onToggleTheme});
+
+  @override
+  State<TaskHomePage> createState() => _TaskHomePageState();
+}
+
+class _TaskHomePageState extends State<TaskHomePage> {
+  List<Task> tasks = [];
+  String search = "";
+  int filter = 0;
+
+  /// ================= ADD =================
+  void addTask(Task task) {
+    setState(() => tasks.add(task));
+  }
+
+  /// ================= DELETE =================
+  void deleteTask(String id) {
+    setState(() => tasks.removeWhere((t) => t.id == id));
+  }
+
+  /// ================= EDIT =================
+  void editTask(Task task, String title, String desc, DateTime date, int repeat) {
+    setState(() {
+      task.title = title;
+      task.description = desc;
+      task.date = date;
+      task.repeatDays = repeat;
+    });
+  }
+
+  /// ================= TOGGLE COMPLETE + REPEAT =================
+  void toggle(Task task) {
+    setState(() {
+      task.completed = !task.completed;
+
+      if (task.completed && task.repeatDays > 0) {
+        tasks.add(Task(
+          id: DateTime.now().millisecondsSinceEpoch.toString(),
+          title: task.title,
+          description: task.description,
+          date: DateTime.now().add(Duration(days: task.repeatDays)),
+          repeatDays: task.repeatDays,
+        ));
+      }
+    });
+  }
+
+  /// ================= FILTER =================
+  List<Task> get filtered {
+    DateTime now = DateTime.now();
+
+    List<Task> base = tasks.where((t) {
+      return t.title.toLowerCase().contains(search.toLowerCase());
+    }).toList();
+
+    switch (filter) {
+      case 1:
+        return base.where((t) => t.completed).toList();
+      case 2:
+        return base.where((t) => !t.completed).toList();
+      case 3:
+        return base.where((t) =>
+        t.date.year == now.year &&
+            t.date.month == now.month &&
+            t.date.day == now.day).toList();
+      default:
+        return base;
+    }
+  }
+
+  /// ================= SYNC =================
+  void sync() {
+    FakeFirebase.upload(tasks);
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text("Synced")));
+  }
+
+  void load() {
+    setState(() => tasks = FakeFirebase.download());
+  }
+
+  /// ================= UI =================
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text("Advanced Task Manager"),
+        actions: [
+          IconButton(icon: Icon(Icons.cloud_upload), onPressed: sync),
+          IconButton(icon: Icon(Icons.cloud_download), onPressed: load),
+          IconButton(icon: Icon(Icons.settings), onPressed: widget.onToggleTheme),
+        ],
+      ),
+
+      body: Column(
+        children: [
+          Padding(
+            padding: EdgeInsets.all(8),
+            child: TextField(
+              decoration: InputDecoration(hintText: "Search"),
+              onChanged: (v) => setState(() => search = v),
+            ),
+          ),
+
+          Wrap(
+            children: [
+              filterBtn("All", 0),
+              filterBtn("Done", 1),
+              filterBtn("Pending", 2),
+              filterBtn("Today", 3),
+            ],
+          ),
+
+          Expanded(
+            child: ListView.builder(
+              itemCount: filtered.length,
+              itemBuilder: (context, i) {
+                final t = filtered[i];
+
+                return Card(
+                  child: ListTile(
+                    title: Text(t.title),
+                    subtitle: Text("${t.description}\nRepeat: ${t.repeatDays} days"),
+                    leading: Checkbox(
+                      value: t.completed,
+                      onChanged: (_) => toggle(t),
+                    ),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          icon: Icon(Icons.edit),
+                          onPressed: () => openEdit(t),
+                        ),
+                        IconButton(
+                          icon: Icon(Icons.delete),
+                          onPressed: () => deleteTask(t.id),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+
+      floatingActionButton: FloatingActionButton(
+        child: Icon(Icons.add),
+        onPressed: openAdd,
+      ),
+    );
+  }
+
+  /// ================= FILTER BUTTON =================
+  Widget filterBtn(String label, int value) {
+    return TextButton(
+      onPressed: () => setState(() => filter = value),
+      child: Text(label),
+    );
+  }
+
+  /// ================= ADD =================
+  void openAdd() {
+    TextEditingController t = TextEditingController();
+    TextEditingController d = TextEditingController();
+    TextEditingController r = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text("Add Task"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(controller: t, decoration: InputDecoration(labelText: "Title")),
+            TextField(controller: d, decoration: InputDecoration(labelText: "Description")),
+            TextField(controller: r, decoration: InputDecoration(labelText: "Repeat Days")),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              addTask(Task(
+                id: DateTime.now().toString(),
+                title: t.text,
+                description: d.text,
+                date: DateTime.now(),
+                repeatDays: int.tryParse(r.text) ?? 0,
+              ));
+              Navigator.pop(context);
+            },
+            child: Text("Add"),
+          )
+        ],
+      ),
+    );
+  }
+
+  /// ================= EDIT =================
+  void openEdit(Task task) {
+    TextEditingController t = TextEditingController(text: task.title);
+    TextEditingController d = TextEditingController(text: task.description);
+    TextEditingController r = TextEditingController(text: task.repeatDays.toString());
+
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text("Edit Task"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(controller: t),
+            TextField(controller: d),
+            TextField(controller: r),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              editTask(
+                task,
+                t.text,
+                d.text,
+                task.date,
+                int.tryParse(r.text) ?? 0,
+              );
+              Navigator.pop(context);
+            },
+            child: Text("Save"),
+          )
+        ],
+      ),
+    );
+  }
+}
